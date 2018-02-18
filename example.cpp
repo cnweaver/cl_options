@@ -15,7 +15,8 @@ int main(int argc, char* argv[]){
 	  "Extract to disk from the archive.");
 	std::string archiveFile;
 	op.addOption('f', archiveFile, 
-	  "Read the archive from or write the archive to the specified file.");
+	  "Read the archive from or write the archive to the specified file.",
+	  "archive");
 	auto positionals = op.parseArgs(argc, argv);
 	
 	//If the user asked for the help message there is probably nothing else 

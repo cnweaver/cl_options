@@ -26,7 +26,13 @@ or may take values, which can be directly stored in a variable
 
 	std::string archiveFile;
 	op.addOption('f', archiveFile, 
-	     "Read the archive from or write the archive to the specified file.");
+	     "Read the archive from or write the archive to the specified file.",
+	     "archive");
+
+Here, the option is also given a description ("Read the archive. . . ") and a 
+name for the value it takes ("archive"). These are used to provide help
+messages for users (see below). A description is required, and though optional,
+a value name is strongly recommended.
 
 Options taking values may also do so via a callback, although in this case
 it is unfortunately necessary to explicit specify the datatype expected by
@@ -35,7 +41,8 @@ the callback:
 	std::string archiveFile;
 	op.addOption<std::string>('f',
 	     [&archiveFile](std::string file){ archiveFile=file; },
-	     "Read the archive from or write the archive to the specified file.");
+	     "Read the archive from or write the archive to the specified file.",
+	     "archive");
 
 Note that options which take value may do so either by consuming the 
 following argument, or may have the value speficier 'inline' with an equals 
@@ -63,7 +70,8 @@ and their values. A more complete 'tar' example:
 	     "Extract to disk from the archive.");
 	std::string archiveFile;
 	op.addOption('f', archiveFile, 
-	     "Read the archive from or write the archive to the specified file.");
+	     "Read the archive from or write the archive to the specified file.",
+	     "archive");
 	auto positionals = op.parseArgs(argc, argv);
 
 With this code in place one could invoke the hypothetical 'tar' program as
@@ -87,7 +95,7 @@ Running this program with any of the built-in help options produces:
 	This is toy example of the tar interface
 	 -c: Create a new archive containing the specified items.
 	 -x: Extract to disk from the archive.
-	 -f: Read the archive from or write the archive to the specified file.
+	 -f archive: Read the archive from or write the archive to the specified file.
 
 The generation of this help message is currently very simple, and makes no 
 effort to reflow text, so users are advised to format description strings 
