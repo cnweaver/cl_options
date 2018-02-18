@@ -5,10 +5,8 @@
 	require(expr,#expr,__LINE__);
 
 void require(bool cond, const char* cond_s, unsigned int line){
-	if(!cond){
-		std::cerr << "FAILURE: Line " << line << ", " << cond_s << '\n';
-		exit(1);
-	}
+	if(!cond)
+		throw std::runtime_error("FAILURE: Line " + std::to_string(line) + ", " + cond_s);
 }
 
 void test_short_flag(){
@@ -19,10 +17,10 @@ void test_short_flag(){
 	std::vector<std::string> positionals;
 	//deliberately omit the option
 	positionals=op.parseArgs(1,args);
-	//REQUIRE(positionals.empty());
+	REQUIRE(positionals.size()==1 && positionals[0]=="program");
 	REQUIRE(!fSet);
 	op.parseArgs(2,args);
-	//REQUIRE(positionals.empty());
+	REQUIRE(positionals.size()==1 && positionals[0]=="program");
 	REQUIRE(fSet);
 }
 
@@ -32,6 +30,7 @@ void test_short_set_value(){
 	op.addOption('i',i,"Set an integer");
 	const char* args[]={"program","-i=52"};
 	const char* badArgs[]={"program","-i"};
+	const char* badArgs2[]={"program","-i="};
 	//deliberately omit the option
 	op.parseArgs(1,args);
 	REQUIRE(i==0);
@@ -39,6 +38,11 @@ void test_short_set_value(){
 	//deliberately omit the value for the option
 	try{
 		op.parseArgs(2,badArgs);
+		REQUIRE(false && "An exception should be thrown");
+	}catch(std::runtime_error& err){}
+	REQUIRE(i==0);
+	try{
+		op.parseArgs(2,badArgs2);
 		REQUIRE(false && "An exception should be thrown");
 	}catch(std::runtime_error& err){}
 	REQUIRE(i==0);
@@ -59,6 +63,40 @@ void test_short_set_value2(){
 	}catch(std::runtime_error& err){}
 	REQUIRE(i==0);
 	op.parseArgs(3,args);
+	REQUIRE(i==52);
+}
+
+void test_short_value_no_equals(){
+	OptionParser op;
+	op.allowsShortValueWithoutEquals(true);
+	int i=0;
+	op.addOption('i',i,"Set an integer");
+	const char* args[]={"program","-i52"};
+	const char* badArgs[]={"program","-i"};
+	const char* badArgs2[]={"program","-i="};
+	const char* argsVerbose[]={"program","-i=52"};
+	//deliberately omit the option
+	op.parseArgs(1,args);
+	REQUIRE(i==0);
+	
+	//deliberately omit the value for the option
+	try{
+		op.parseArgs(2,badArgs);
+		REQUIRE(false && "An exception should be thrown");
+	}catch(std::runtime_error& err){}
+	REQUIRE(i==0);
+	try{
+		op.parseArgs(2,badArgs2);
+		REQUIRE(false && "An exception should be thrown");
+	}catch(std::runtime_error& err){}
+	REQUIRE(i==0);
+	
+	op.parseArgs(2,args);
+	REQUIRE(i==52);
+	
+	//continuing to use an equals sign should still work
+	i=0;
+	op.parseArgs(2,argsVerbose);
 	REQUIRE(i==52);
 }
 
@@ -107,10 +145,10 @@ void test_long_flag(){
 	std::vector<std::string> positionals;
 	//deliberately omit the option
 	positionals=op.parseArgs(1,args);
-	//REQUIRE(positionals.empty());
+	REQUIRE(positionals.size()==1 && positionals[0]=="program");
 	REQUIRE(!fSet);
 	op.parseArgs(2,args);
-	//REQUIRE(positionals.empty());
+	REQUIRE(positionals.size()==1 && positionals[0]=="program");
 	REQUIRE(fSet);
 }
 
@@ -208,18 +246,40 @@ void test_positionals_and_options(){
 	REQUIRE(number==17);
 }
 
+#define DO_TEST(test) \
+	do{ \
+	try{ \
+		test(); \
+	}catch(std::out_of_range& ex){ \
+		std::cout << #test << ":\n\tOut of Range: " << ex.what() << std::endl; \
+		failures++; \
+	}catch(std::exception& ex){ \
+		std::cout << #test << ":\n\t" << ex.what() << std::endl; \
+		failures++; \
+	}catch(...){ \
+		failures++; \
+	} \
+	}while(0)
+
 int main(){
-	test_short_flag();
-	test_short_set_value();
-	test_short_set_value2();
-	test_short_set_value_callback();
-	test_short_set_value_callback2();
-	test_long_flag();
-	test_long_set_value();
-	test_long_set_value2();
-	test_long_set_value_callback();
-	test_long_set_value_callback2();
-	test_positionals();
-	test_positionals_and_options();
-	std::cout << "Test successful" << std::endl;
+	unsigned int failures=0;
+	
+	DO_TEST(test_short_flag);
+	DO_TEST(test_short_set_value);
+	DO_TEST(test_short_set_value2);
+	DO_TEST(test_short_value_no_equals);
+	DO_TEST(test_short_set_value_callback);
+	DO_TEST(test_short_set_value_callback2);
+	DO_TEST(test_long_flag);
+	DO_TEST(test_long_set_value);
+	DO_TEST(test_long_set_value2);
+	DO_TEST(test_long_set_value_callback);
+	DO_TEST(test_long_set_value_callback2);
+	DO_TEST(test_positionals);
+	DO_TEST(test_positionals_and_options);
+	
+	if(!failures)
+		std::cout << "Test successful" << std::endl;
+	else
+		std::cout << failures << (failures==1?" failure":" failures") << std::endl;
 }

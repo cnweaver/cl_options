@@ -130,6 +130,9 @@ private:
 	bool printedUsage;
 	///the help text
 	std::string usageMessage;
+	///Whether a short option taking a value may be directly followed by its 
+	///value without a separating equals sign
+	bool allowShortValueWithoutEquals;
 	
 	///check whether an identifier is a valid option name
 	void checkIdentifier(std::string ident){
@@ -205,10 +208,89 @@ private:
 		NonOption 
 	};
 	
+	///Process one argument as a short option
+	///\param arg the argument
+	///\param startIdx the character index within arg where the option should begin
+	ArgumentState handleShortOption(const std::string& arg, const size_t startIdx){
+		static const auto& npos=std::string::npos;
+		size_t endIdx, valueOffset=0;
+		if(allowShortValueWithoutEquals){
+			endIdx=startIdx+1;
+			if(endIdx==arg.size())
+				endIdx=npos;
+			else if(arg[endIdx]=='=')
+				valueOffset=1;
+		}
+		else{
+			endIdx=arg.find('=',startIdx);
+			valueOffset=1;
+		}
+		std::string opt=arg.substr(startIdx,(endIdx==npos?npos:endIdx-startIdx));
+		
+		if(opt.empty())
+			throw std::runtime_error("Invalid option: '"+arg+"'");
+		
+		if(opt.size()>1)
+			throw std::runtime_error("Malformed option: '"+arg+"' (wrong number of leading dashes)");
+		
+		std::string value;
+		if(endIdx!=npos && endIdx!=arg.size()-1)
+			value=arg.substr(endIdx+valueOffset);
+		
+		char optC=opt[0];
+		if(shortOptions.count(optC)){
+			if(endIdx==npos)
+				return(ArgumentState::OptionNeedsValue);
+			shortOptions.find(optC)->second(value);
+		}
+		else if(shortOptionsNoStore.count(optC)){
+			if(endIdx!=npos)
+				throw std::runtime_error("Malformed option: '"+arg+"' (no value expected for this flag)");
+			shortOptionsNoStore.find(optC)->second();
+		}
+		else
+			throw std::runtime_error("Unknown option: '"+arg+"'");
+		
+		return(ArgumentState::Option);
+	}
+	
+	///Process one argument as a long option
+	///\param arg the argument
+	///\param startIdx the character index within arg where the option should begin
+	ArgumentState handleLongOption(const std::string& arg, const size_t startIdx){
+		static const auto& npos=std::string::npos;
+		size_t endIdx=arg.find('=',startIdx);
+		std::string opt=arg.substr(startIdx,(endIdx==npos?npos:endIdx-startIdx));
+		
+		if(opt.empty())
+			throw std::runtime_error("Invalid option: '"+arg+"'");
+		
+		if(opt.size()==1)
+			throw std::runtime_error("Malformed option: '"+arg+"' (wrong number of leading dashes)");
+		
+		std::string value;
+		if(endIdx!=npos && endIdx!=arg.size()-1)
+			value=arg.substr(endIdx+1);
+		
+		if(longOptions.count(opt)){
+			if(endIdx==npos)
+				return(ArgumentState::OptionNeedsValue);
+			longOptions.find(opt)->second(value);
+		}
+		else if(longOptionsNoStore.count(opt)){
+			if(endIdx!=npos)
+				throw std::runtime_error("Malformed option: '"+arg+"' (no value expected for this flag)");
+			longOptionsNoStore.find(opt)->second();
+		}
+		else
+			throw std::runtime_error("Unknown option: '"+arg+"'");
+		
+		return(ArgumentState::Option);
+	}
+	
 	///Process one argument in isolation
 	///\return the type of the argument and whether it was consumed
 	ArgumentState handleNextArg(const std::string& arg){
-		static const auto npos=std::string::npos;
 		if(arg.size()<2) //not an option, skip it
 			return(ArgumentState::NonOption);
 		if(arg[0]!='-') //not an option, skip it
@@ -216,49 +298,11 @@ private:
 		size_t startIdx=arg.find_first_not_of('-');
 		if(startIdx>2) //not an option, skip it
 			return(ArgumentState::NonOption);
-		size_t endIdx=arg.find('=',startIdx);
-		std::string opt=arg.substr(startIdx,(endIdx==npos?npos:endIdx-startIdx));
-		
-		if(opt.empty())
-			throw std::runtime_error("Invalid option: '"+arg+"'");
-		
-		if((opt.size()==1 && startIdx>1) || (opt.size()>1 && startIdx==1))
-			throw std::runtime_error("Malformed option: '"+arg+"' (wrong number of leading dashes)");
-		
-		std::string value;
-		if(endIdx!=npos && endIdx!=arg.size()-1)
-			value=arg.substr(endIdx+1);
-		
-		if(opt.size()==1){
-			char optC=opt[0];
-			if(shortOptions.count(optC)){
-				if(endIdx==npos)
-					return(ArgumentState::OptionNeedsValue);
-				shortOptions.find(optC)->second(value);
-			}
-			else if(shortOptionsNoStore.count(optC)){
-				if(endIdx!=npos)
-					throw std::runtime_error("Malformed option: '"+arg+"' (no value expected for this flag)");
-				shortOptionsNoStore.find(optC)->second();
-			}
-			else
-				throw std::runtime_error("Unknown option: '"+arg+"'");
+		if(startIdx==1) //dealing with a short option
+			return(handleShortOption(arg,startIdx));
+		else{ //dealing with a long option
+			return(handleLongOption(arg,startIdx));
 		}
-		else{
-			if(longOptions.count(opt)){
-				if(endIdx==npos)
-					return(ArgumentState::OptionNeedsValue);
-				longOptions.find(opt)->second(value);
-			}
-			else if(longOptionsNoStore.count(opt)){
-				if(endIdx!=npos)
-					throw std::runtime_error("Malformed option: '"+arg+"' (no value expected for this flag)");
-				longOptionsNoStore.find(opt)->second();
-			}
-			else
-				throw std::runtime_error("Unknown option: '"+arg+"'");
-		}
-		return(ArgumentState::Option);
 	}
 	
 	///Process an argument which takes a value
@@ -322,7 +366,8 @@ public:
 	///\param automaticHelp automatically add '-h', '-?', "--help" and "--usage"
 	///                     as options which trigger printing the autogenerated
 	///                     help message
-	explicit OptionParser(bool automaticHelp=true):printedUsage(false){
+	explicit OptionParser(bool automaticHelp=true):printedUsage(false),
+	allowShortValueWithoutEquals(false){
 		if(automaticHelp)
 			addOption({"h","?","help","usage"},
 					  [this](){
@@ -350,6 +395,18 @@ public:
 	///Whether the help message was automatically printed
 	bool didPrintUsage() const{
 		return(printedUsage);
+	}
+	
+	///Whether a short option taking a value may be directly followed by its 
+	///value without a separating equals sign, e.g. -lfoo as a linking option
+	///to specify linking against 'foo'.
+	bool allowsShortValueWithoutEquals() const{ return(allowShortValueWithoutEquals); }
+	
+	///Change whether a short option taking a value may be directly followed by 
+	///its value without a separating equals sign. 
+	///\param allow whether this form is allowed.
+	void allowsShortValueWithoutEquals(bool allow){
+		allowShortValueWithoutEquals=allow;
 	}
 	
 	///Add a short option which stores a value to a variable

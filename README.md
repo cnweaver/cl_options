@@ -39,7 +39,7 @@ the callback:
 
 Note that options which take value may do so either by consuming the 
 following argument, or may have the value speficier 'inline' with an equals 
-sign so that both of the following invokations of a program with the above 
+sign so that both of the following invocations of a program with the above 
 option are equivalent:
 
 	tar -f archive.tar
@@ -76,7 +76,7 @@ and `create` would be set to `true`, while `positionals` would be an
 This class also supports generating simple usage information, and by default
 the options '-h', '-?', '--help', and '--usage' will write it to standard 
 output. (These default options may be suppressed when the OptionParser is 
-constructed.) Eachoption is summarized using the description string provided 
+constructed.) Each option is summarized using the description string provided 
 when it is added, and custom introductory text can be added before this. 
 Adding to the above example:
 
@@ -92,3 +92,19 @@ Running this program with any of the built-in help options produces:
 The generation of this help message is currently very simple, and makes no 
 effort to reflow text, so users are advised to format description strings 
 themselves. 
+
+For short options, it may be desirable to support accepting a value as part of the 
+same argument, without an intervening equals sign, as in
+
+	# run make with 8 jobs
+	make -j8
+	# compile foo.c, linking against libbar and libbaz
+	$CC foo.c -lbar -lbaz -o foo
+
+This behavior is supported, but turned off by default. To activate it do
+
+	op.allowsShortValueWithoutEquals(true);
+
+This covers short options only, as supporting long options would require both more
+complex parsing and could lead to ambiguities. (If 'foo' were an option taking a 
+value and 'foobar' were also an option, how should `--foobar` be interpreted?)
