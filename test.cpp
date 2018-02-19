@@ -336,6 +336,23 @@ void test_positionals_and_options(){
 	REQUIRE(number==17);
 }
 
+void test_option_terminator(){
+	OptionParser op;
+	bool fSet=false, gSet=false;
+	int i=0;
+	op.addOption('f',[&]{fSet=true;},"Set a flag");
+	op.addOption('g',[&]{gSet=true;},"Set another flag");
+	op.allowsOptionTerminator(true);
+	const char* args[]={"program","foo","-g","bar","--","baz","-f"};
+	std::vector<std::string> positionals=op.parseArgs(7,args);
+	REQUIRE(positionals.size()==5);
+	REQUIRE(gSet);
+	//option-like arguments after the option terminator should be passed through
+	//as positionals
+	REQUIRE(!fSet);
+	REQUIRE(positionals.back()=="-f");
+}
+
 #define DO_TEST(test) \
 	do{ \
 	try{ \
@@ -370,6 +387,7 @@ int main(){
 	DO_TEST(test_long_set_value_callback2);
 	DO_TEST(test_positionals);
 	DO_TEST(test_positionals_and_options);
+	DO_TEST(test_option_terminator);
 	
 	if(!failures)
 		std::cout << "Test successful" << std::endl;

@@ -131,10 +131,25 @@ same argument, without an intervening equals sign, as in
 	# compile foo.c, linking against libbar and libbaz
 	$CC foo.c -lbar -lbaz -o foo
 
-This behavior is supported, but turned off by default. To activate it do
+This behavior is supported, but turned off by default. To activate it use
 
 	op.allowsShortValueWithoutEquals(true);
 
 This covers short options only, as supporting long options would require both more
 complex parsing and could lead to ambiguities. (If 'foo' were an option taking a 
 value and 'foobar' were also an option, how should `--foobar` be interpreted?)
+
+Another feature which is sometimes important is providing a way to terminate option
+parsing and treat all remaining arguments as positional. This is relevant for 
+allowing programs to accept filenames beginning with dashes as arguments, as well as
+debuggers and other wrapper programs, which may have many options of their own, but 
+also wish to take a series of arguments defining another program to be run including 
+its own options and arguments. This is optionally supported by the special option 
+'--', which can be used to indicate that all following arguments should be passed 
+through without further interpretation. This feature is enabled by
+
+	op.allowsOptionTerminator(true);
+
+Because of the simplistic way that the help text is accumulated currently, disabling
+this feature after enabling it does not remove the automatically added entry in the 
+help text, and enabling it multiple times will result in multiple copies of that text. 

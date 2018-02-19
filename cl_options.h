@@ -137,6 +137,8 @@ private:
 	bool useANSICodes;
 	///Whether multiple short options may be run together
 	bool allowShortOptionCombination;
+	///Whether the special option '--' ends option parsing
+	bool allowOptionTerminator;
 	
 	///check whether an identifier is a valid option name
 	void checkIdentifier(std::string ident){
@@ -210,7 +212,9 @@ private:
 			///an option which requires an associated value
 			OptionNeedsValue, 
 			///not an option, a positional argument
-			NonOption
+			NonOption, 
+			///the special option  which ends option parsing
+			OptionTerminator
 		} type;
 		const std::string option;
 		ArgumentState(ArgumentStateType t):type(t){
@@ -307,6 +311,8 @@ private:
 			return(ArgumentState::NonOption);
 		if(arg[0]!='-') //not an option, skip it
 			return(ArgumentState::NonOption);
+		if(allowOptionTerminator && arg=="--")
+			return(ArgumentState::OptionTerminator);
 		size_t startIdx=arg.find_first_not_of('-');
 		if(startIdx>2) //not an option, skip it
 			return(ArgumentState::NonOption);
@@ -374,7 +380,7 @@ public:
 	///                     help message
 	explicit OptionParser(bool automaticHelp=true):printedUsage(false),
 	allowShortValueWithoutEquals(false),useANSICodes(true),
-	allowShortOptionCombination(false){
+	allowShortOptionCombination(false),allowOptionTerminator(false){
 		if(automaticHelp)
 			addOption({"h","?","help","usage"},
 					  [this](){
@@ -411,8 +417,8 @@ public:
 		return(allowShortValueWithoutEquals); 
 	}
 	
-	///Change whether a short option taking a value may be directly followed by 
-	///its value without a separating equals sign. 
+	///Set whether a short option taking a value may be directly followed by its 
+	///value without a separating equals sign. 
 	///\param allow whether this form is allowed.
 	void allowsShortValueWithoutEquals(bool allow){
 		allowShortValueWithoutEquals=allow;
@@ -424,17 +430,28 @@ public:
 		return(allowShortOptionCombination);
 	}
 	
-	///Change whether multiple short options may be written together in a single 
+	///Set whether multiple short options may be written together in a single 
 	///argument
 	///\param allow whether this usage is allowed
 	void allowsShortOptionCombination(bool allow){
 		allowShortOptionCombination=allow;
 	}
 	
+	///Whether the special option '--' ends option parsing
+	bool allowsOptionTerminator() const{ return(allowOptionTerminator); }
+	
+	///Set whether the special option '--' ends option parsing
+	///\param allow whether this feature is enabled
+	void allowsOptionTerminator(bool allow){
+		allowOptionTerminator=allow;
+		if(allowOptionTerminator)
+			usageMessage+=" --: Treat all subsequent arguments as postional.";
+	}
+	
 	///Whether help text will use ANSI escape sequences for fancier text rendering
 	bool usesANSICodes() const{ return(useANSICodes); }
 	
-	///Change whether help text will use ANSI escape sequences for fancier text 
+	///Set whether help text will use ANSI escape sequences for fancier text 
 	///rendering
 	///\param use whether escape codes will be used
 	void usesANSICodes(bool use){ useANSICodes=use; }
@@ -597,9 +614,18 @@ public:
 						throw std::runtime_error("Missing value for '"+arg+"'");
 					handleOptWithValue(state.option,*argBegin);
 					break;
+				case ArgumentState::OptionTerminator:
+					//no more option parsing should be done; shove all remaining
+					//arguments into positionals
+					for(argBegin++; argBegin!=argEnd; argBegin++)
+						positionals.push_back(*argBegin);
+					break;
 			}
-				
-			argBegin++;
+			
+			//move to the next argument, unless we know all arguments have 
+			//already been consumed
+			if(state.type!=ArgumentState::OptionTerminator)
+				argBegin++;
 		}
 		return(positionals);
 	}
