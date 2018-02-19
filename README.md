@@ -81,6 +81,28 @@ With this code in place one could invoke the hypothetical 'tar' program as
 and `create` would be set to `true`, while `positionals` would be an
 `std::vector<std::string>` containing `{"tar","file1","file2"}`. 
 
+A common shortcut to reduce typing is to allow multiple short options to be
+run together in a single argument. This is not enabled by default, but can
+be turned on:
+
+	op.allowsShortOptionCombination(true);
+
+Inserting this into the example makes it allow
+
+	tar -cf my_files.tar file1 file2
+
+Any number of flags may be combined in this way, but at most one option taking 
+a value may appear, and it must be the last in the combined argument. Otherwise,
+there would be no way for the parser to know in general where the value for an
+option ended and where additional option packed into the same argument might
+begin. 
+
+Since we have taken `tar` as an example, it should also be noted that even
+when short option combining is allowed, the BSD-style 'bundled flags' first
+positional argument is not supported. (It is not exactly forbidden, as this
+implementation will simply treat it as a positional argument and pass it as
+such back to the calling code, but no automatic parsing is directly provided.)
+
 This class also supports generating simple usage information, and by default
 the options '-h', '-?', '--help', and '--usage' will write it to standard 
 output. (These default options may be suppressed when the OptionParser is 

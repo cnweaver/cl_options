@@ -17,6 +17,7 @@ int main(int argc, char* argv[]){
 	op.addOption('f', archiveFile, 
 	  "Read the archive from or write the archive to the specified file.",
 	  "archive");
+	op.allowsShortOptionCombination(true);
 	auto positionals = op.parseArgs(argc, argv);
 	
 	//If the user asked for the help message there is probably nothing else 
@@ -56,7 +57,7 @@ int main(int argc, char* argv[]){
 		std::cout << std::endl;
 	}
 	if(extract)
-		std::cout << "If this were a real implementation of tar it would extract"
+		std::cout << "If this were a real implementation of tar it would extract "
 		  << archiveFile << std::endl;
 	return(0);
 }

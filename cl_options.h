@@ -135,6 +135,8 @@ private:
 	bool allowShortValueWithoutEquals;
 	///Whether to use ANSI escape codes when generating text to print
 	bool useANSICodes;
+	///Whether multiple short options may be run together
+	bool allowShortOptionCombination;
 	
 	///check whether an identifier is a valid option name
 	void checkIdentifier(std::string ident){
@@ -201,13 +203,21 @@ private:
 						 }));
 	}
 	
-	enum class ArgumentState{
-		///a self-contained option
-		Option, 
-		///an option which requires an associated value
-		OptionNeedsValue, 
-		///not an option, a positional argument
-		NonOption 
+	struct ArgumentState{
+		const enum ArgumentStateType{
+			///a self-contained option
+			Option, 
+			///an option which requires an associated value
+			OptionNeedsValue, 
+			///not an option, a positional argument
+			NonOption
+		} type;
+		const std::string option;
+		ArgumentState(ArgumentStateType t):type(t){
+			if(type==OptionNeedsValue)
+				throw std::logic_error("OptionNeedsValue state must have an option name");
+		}
+		ArgumentState(ArgumentStateType t, std::string opt):type(t),option(opt){}
 	};
 	
 	///Process one argument as a short option
@@ -216,7 +226,7 @@ private:
 	ArgumentState handleShortOption(const std::string& arg, const size_t startIdx){
 		static const auto& npos=std::string::npos;
 		size_t endIdx, valueOffset=0;
-		if(allowShortValueWithoutEquals){
+		if(allowShortValueWithoutEquals || allowShortOptionCombination){
 			endIdx=startIdx+1;
 			if(endIdx==arg.size())
 				endIdx=npos;
@@ -235,23 +245,23 @@ private:
 		if(opt.size()>1)
 			throw std::runtime_error("Malformed option: '"+arg+"' (wrong number of leading dashes)");
 		
-		std::string value;
-		if(endIdx!=npos && endIdx!=arg.size()-1)
-			value=arg.substr(endIdx+valueOffset);
-		
 		char optC=opt[0];
-		if(shortOptions.count(optC)){
-			if(endIdx==npos)
-				return(ArgumentState::OptionNeedsValue);
-			shortOptions.find(optC)->second(value);
-		}
-		else if(shortOptionsNoStore.count(optC)){
-			if(endIdx!=npos)
+		if(shortOptionsNoStore.count(optC)){
+			if(endIdx!=npos && !allowShortOptionCombination)
 				throw std::runtime_error("Malformed option: '"+arg+"' (no value expected for this flag)");
 			shortOptionsNoStore.find(optC)->second();
+			//if stuff remains in the argument, recurse to process it
+			if(allowShortOptionCombination && endIdx!=npos)
+				return(handleShortOption(arg,startIdx+1)); 
+		}
+		else if(shortOptions.count(optC)){
+			if(endIdx==npos)
+				return(ArgumentState{ArgumentState::OptionNeedsValue,opt});
+			std::string value=arg.substr(endIdx+valueOffset);
+			shortOptions.find(optC)->second(value);
 		}
 		else
-			throw std::runtime_error("Unknown option: '"+arg+"'");
+			throw std::runtime_error("Unknown option: '"+opt+"' in '"+arg+"'");
 		
 		return(ArgumentState::Option);
 	}
@@ -276,7 +286,7 @@ private:
 		
 		if(longOptions.count(opt)){
 			if(endIdx==npos)
-				return(ArgumentState::OptionNeedsValue);
+				return(ArgumentState{ArgumentState::OptionNeedsValue,opt});
 			longOptions.find(opt)->second(value);
 		}
 		else if(longOptionsNoStore.count(opt)){
@@ -302,41 +312,29 @@ private:
 			return(ArgumentState::NonOption);
 		if(startIdx==1) //dealing with a short option
 			return(handleShortOption(arg,startIdx));
-		else{ //dealing with a long option
+		else //dealing with a long option
 			return(handleLongOption(arg,startIdx));
-		}
 	}
 	
 	///Process an argument which takes a value
+	///\param option the name of the value consuming option previously encountered
+	///\param value the next argument, taken to be the value
 	///\pre the argument has aready been classified and sanity checked by handleNextArg
-	void handleArgWithValue(const std::string& arg, const std::string& value){
-		static const auto npos=std::string::npos;
-		size_t startIdx=arg.find_first_not_of('-');
-		if(startIdx>2) //not an option, skip it
-			throw std::runtime_error("Internal logic error handling option: '"+arg+"'");
-		size_t endIdx=arg.find('=',startIdx);
-		std::string opt=arg.substr(startIdx,(endIdx==npos?npos:endIdx-startIdx));
-		
-		if(opt.empty())
-			throw std::runtime_error("Invalid option: '"+arg+"'");
-		
-		if((opt.size()==1 && startIdx>1) || (opt.size()>1 && startIdx==1))
-			throw std::runtime_error("Malformed option: '"+arg+"' (wrong number of leading dashes)");
-		
+	void handleOptWithValue(const std::string& opt, const std::string& value){
 		if(opt.size()==1){
 			char optC=opt[0];
 			if(shortOptions.count(optC)){
 				shortOptions.find(optC)->second(value);
 			}
 			else
-				throw std::runtime_error("Internal logic error handling option: '"+arg+"'");
+				throw std::runtime_error("Internal logic error handling option: '"+opt+"'");
 		}
 		else{
 			if(longOptions.count(opt)){
 				longOptions.find(opt)->second(value);
 			}
 			else
-				throw std::runtime_error("Internal logic error handling option: '"+arg+"'");
+				throw std::runtime_error("Internal logic error handling option: '"+opt+"'");
 		}
 	}
 	
@@ -375,7 +373,8 @@ public:
 	///                     as options which trigger printing the autogenerated
 	///                     help message
 	explicit OptionParser(bool automaticHelp=true):printedUsage(false),
-	allowShortValueWithoutEquals(false),useANSICodes(true){
+	allowShortValueWithoutEquals(false),useANSICodes(true),
+	allowShortOptionCombination(false){
 		if(automaticHelp)
 			addOption({"h","?","help","usage"},
 					  [this](){
@@ -417,6 +416,19 @@ public:
 	///\param allow whether this form is allowed.
 	void allowsShortValueWithoutEquals(bool allow){
 		allowShortValueWithoutEquals=allow;
+	}
+	
+	///Whether multiple short options may be written together in a single 
+	///argument
+	bool allowsShortOptionCombination() const{ 
+		return(allowShortOptionCombination);
+	}
+	
+	///Change whether multiple short options may be written together in a single 
+	///argument
+	///\param allow whether this usage is allowed
+	void allowsShortOptionCombination(bool allow){
+		allowShortOptionCombination=allow;
 	}
 	
 	///Whether help text will use ANSI escape sequences for fancier text rendering
@@ -570,7 +582,8 @@ public:
 		std::vector<std::string> positionals;
 		while(argBegin!=argEnd){
 			std::string arg=*argBegin;
-			switch(handleNextArg(arg)){
+			ArgumentState state=handleNextArg(arg);
+			switch(state.type){
 				case ArgumentState::Option:
 					//nothing left to do
 					break;
@@ -582,7 +595,7 @@ public:
 					argBegin++;
 					if(argBegin==argEnd)
 						throw std::runtime_error("Missing value for '"+arg+"'");
-					handleArgWithValue(arg,*argBegin);
+					handleOptWithValue(state.option,*argBegin);
 					break;
 			}
 				
