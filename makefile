@@ -3,10 +3,10 @@ PREFIX?=/usr/local
 all : example test
 
 test : cl_options.h test.cpp
-	$(CXX) test.cpp -o test
+	$(CXX) -std=c++11 test.cpp -o test
 
 example : cl_options.h example.cpp
-	$(CXX) example.cpp -o example
+	$(CXX) -std=c++11 example.cpp -o example
 
 clean : 
 	rm -f test example
