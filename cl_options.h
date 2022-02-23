@@ -173,6 +173,7 @@ private:
 		storeMap.emplace(ident,
 		                 [ident,&destination](std::string optData)->void{
 		                 	std::istringstream ss(optData);
+		                 	ss.setf(std::cout.boolalpha);	
 		                 	ss >> destination;
 		                 	if(ss.fail()){
 		                 		throw std::runtime_error("Failed to parse \""+optData+"\" as argument to '"
@@ -196,6 +197,7 @@ private:
 						 [ident,action](std::string optData)->void{
 							 std::istringstream ss(optData);
 							 DestType destination;
+							 ss.setf(std::cout.boolalpha);	
 							 ss >> destination;
 							 if(ss.fail()){
 								 throw std::runtime_error("Failed to parse \""+optData+"\" as argument to '"
@@ -373,6 +375,16 @@ private:
 		return(s);
 	}
 	
+	template<typename T>
+	struct valueForDisplay_traits{
+		using Result=const T&;
+	};
+	
+	template<typename T>
+	typename valueForDisplay_traits<T>::Result valueForDisplay(const T& value) const{
+		return value;
+	}
+	
 public:
 	///Construct an OptionParser
 	///\param automaticHelp automatically add '-h', '-?', "--help" and "--usage"
@@ -466,7 +478,8 @@ public:
 		addOption(ident,destination,shortOptions);
 		description=indentDescription(description);
 		std::ostringstream ss;
-		ss  << " -" << ident << ' ' << underline(valueName) << ": " << description << '\n';
+		ss  << " -" << ident << ' ' << underline(valueName) << ": " << description 
+			<< "\n    (default: " << valueForDisplay(destination) << ")\n";
 		usageMessage+=ss.str();
 	}
 	///Add a short option which invokes a callback which takes no argument
@@ -504,7 +517,8 @@ public:
 		addOption(ident,destination,longOptions);
 		description=indentDescription(description);
 		std::ostringstream ss;
-		ss  << " --" << ident << ' ' << underline(valueName) << ": " << description << '\n';
+		ss  << " --" << ident << ' ' << underline(valueName) << ": " << description 
+			<< "\n    (default: " << valueForDisplay(destination) << ")\n";
 		usageMessage+=ss.str();
 	}
 	///Add a long option which invokes a callback which takes no argument
@@ -548,7 +562,8 @@ public:
 		}
 		description=indentDescription(description);
 		std::ostringstream ss;
-		ss << ' ' << synonymList(idents) << ' ' << underline(valueName) << ": " << description << '\n';
+		ss << ' ' << synonymList(idents) << ' ' << underline(valueName) << ": " << description 
+			<< "\n    (default: " << valueForDisplay(destination) << ")\n";
 		usageMessage+=ss.str();
 	}
 	///Add an option with multiple synonyms which invokes a callback which takes no argument
@@ -646,5 +661,33 @@ public:
 		return(parseArgs(argv,argv+argc));
 	}
 };
+
+template<>
+struct OptionParser::valueForDisplay_traits<bool>{
+	using Result=std::string;
+};
+
+template<>
+struct OptionParser::valueForDisplay_traits<std::string>{
+	using Result=std::string;
+};
+
+//show boolean values as nice strings
+template<>
+typename OptionParser::valueForDisplay_traits<bool>::Result OptionParser::valueForDisplay<bool>(const bool& value) const{
+	std::ostringstream ss;
+	ss.setf(std::cout.boolalpha);
+	ss << value;
+	return ss.str();
+}
+
+//surround string values with quotes
+template<>
+typename OptionParser::valueForDisplay_traits<std::string>::Result OptionParser::valueForDisplay<std::string>(const std::string& s) const{
+	std::ostringstream ss;
+	ss.setf(std::cout.boolalpha);
+	ss << '"' << s << '"';
+	return ss.str();
+}
 
 #endif //CL_OPTIONS_H

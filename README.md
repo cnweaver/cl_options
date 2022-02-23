@@ -118,10 +118,16 @@ Running this program with any of the built-in help options produces:
 	 -c: Create a new archive containing the specified items.
 	 -x: Extract to disk from the archive.
 	 -f archive: Read the archive from or write the archive to the specified file.
+	    (default: "")
 
 The generation of this help message is currently very simple, and makes no 
 effort to reflow text, so users are advised to format description strings 
-themselves. 
+themselves. It will attempt to show the default values of options, in cases where 
+the option is directly associated with a variable. This feature is also fairly
+simplistic, and takes the value of the variable *at the time `addOption` was 
+called*, so if the value of the variable is otherwise changed between when the 
+option is configured and when argument parsing occurs, the user can be misled as 
+to the default value. 
 
 For short options, it may be desirable to support accepting a value as part of the 
 same argument, without an intervening equals sign, as in
