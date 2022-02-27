@@ -1,13 +1,21 @@
 #include <iostream>
+#include <unistd.h>
 #include "cl_options.h"
 
-#define REQUIRE(expr) \
-	require(expr,#expr,__LINE__);
+//Launder access to private class members for testing
+class cl_options_test_access{
+public:
+	template<typename C>
+	using TokenIterator=OptionParser::TokenIterator<C>;
+};
 
 void require(bool cond, const char* cond_s, unsigned int line){
 	if(!cond)
 		throw std::runtime_error("FAILURE: Line " + std::to_string(line) + ", " + cond_s);
 }
+
+#define REQUIRE(expr) \
+require(expr,#expr,__LINE__);
 
 void test_short_flag(){
 	OptionParser op;
@@ -353,6 +361,135 @@ void test_option_terminator(){
 	REQUIRE(positionals.back()=="-f");
 }
 
+void test_token_iterator(){
+	std::string rawInput=R"(foo "bar baz" quux\ xen
+	'"hom" \drel')";
+	std::istringstream iss(rawInput);
+	using CharIterator=std::istreambuf_iterator<char>;
+	using TokenIterator=cl_options_test_access::TokenIterator<CharIterator>;
+	CharIterator cit(iss), cend;
+	TokenIterator it(cit,cend), end(cend,cend);
+	REQUIRE(it!=end);
+	REQUIRE(*it=="foo");
+	
+	it++;
+	REQUIRE(it!=end);
+	REQUIRE(*it=="bar baz");
+	
+	++it;
+	REQUIRE(it!=end);
+	REQUIRE(*it=="quux xen");
+	
+	++it;
+	REQUIRE(it!=end);
+	REQUIRE(*it=="\"hom\" \\drel");
+}
+
+void test_positionals_and_options_from_stream(){
+	bool fSet=false;
+	int number=0;
+	OptionParser op;
+	op.addOption('f',[&]{fSet=true;},"Set a flag");
+	op.addOption("integer",number,"Set an integer");
+	std::string args="program foo -f bar --integer 17 'baz quux'";
+	std::istringstream iss(args);
+	std::vector<std::string> positionals=op.parseArgsFromStream(iss);
+	REQUIRE(positionals.size()==4);
+	REQUIRE(fSet);
+	REQUIRE(number==17);
+}
+
+void test_config_file_parsing_short_option(){
+	bool fSet=false;
+	int number=0;
+	OptionParser op;
+	op.addOption('f',[&]{fSet=true;},"Set a flag");
+	op.addOption("integer",number,"Set an integer");
+	op.addConfigFileOption('c',"Read config from a file");
+	{
+		std::ofstream o1(".test_c1");
+		o1 << "-f -c .test_c2";
+		std::ofstream o2(".test_c2");
+		o2 << "--integer 17";
+	}
+	const char* args[]={"program","foo","-c",".test_c1","bar","baz quux"};
+	std::vector<std::string> positionals=op.parseArgs(6,args);
+	unlink(".test_c1");
+	unlink(".test_c2");
+	REQUIRE(positionals.size()==4);
+	REQUIRE(fSet);
+	REQUIRE(number==17);
+}
+
+void test_config_file_parsing_long_option(){
+	bool fSet=false;
+	int number=0;
+	OptionParser op;
+	op.addOption('f',[&]{fSet=true;},"Set a flag");
+	op.addOption("integer",number,"Set an integer");
+	op.addConfigFileOption("config","Read config from a file");
+	{
+		std::ofstream o1(".test_c1");
+		o1 << "-f --config .test_c2";
+		std::ofstream o2(".test_c2");
+		o2 << "--integer 17";
+	}
+	const char* args[]={"program","foo","--config",".test_c1","bar","baz quux"};
+	std::vector<std::string> positionals=op.parseArgs(6,args);
+	unlink(".test_c1");
+	unlink(".test_c2");
+	REQUIRE(positionals.size()==4);
+	REQUIRE(fSet);
+	REQUIRE(number==17);
+}
+
+void test_config_file_parsing_short_and_long_options(){
+	bool fSet=false;
+	int number=0;
+	OptionParser op;
+	op.addOption('f',[&]{fSet=true;},"Set a flag");
+	op.addOption("integer",number,"Set an integer");
+	op.addConfigFileOption({"c","config"},"Read config from a file");
+	{
+		std::ofstream o1(".test_c1");
+		o1 << "-f --config .test_c2";
+		std::ofstream o2(".test_c2");
+		o2 << "--integer 17";
+	}
+	const char* args[]={"program","foo","-c",".test_c1","bar","baz quux"};
+	std::vector<std::string> positionals=op.parseArgs(6,args);
+	unlink(".test_c1");
+	unlink(".test_c2");
+	REQUIRE(positionals.size()==4);
+	REQUIRE(fSet);
+	REQUIRE(number==17);
+}
+
+void test_config_file_parsing_loop(){
+	bool fSet=false;
+	int number=0;
+	OptionParser op;
+	op.addOption('f',[&]{fSet=true;},"Set a flag");
+	op.addOption("integer",number,"Set an integer");
+	op.addConfigFileOption("config","Read config from a file");
+	{
+		std::ofstream o1(".test_c1");
+		o1 << "-f --config .test_c2";
+		std::ofstream o2(".test_c2");
+		o2 << "--integer 17 --config .test_c1";
+	}
+	const char* args[]={"program","foo","--config",".test_c1","bar","baz quux"};
+	try{
+		std::vector<std::string> positionals=op.parseArgs(6,args);
+		REQUIRE(false && "An exception should be thrown");
+	}catch(std::exception& ex){
+		std::string err=ex.what();
+		REQUIRE(err.find("Configuration file loop")!=std::string::npos);
+	}
+	unlink(".test_c1");
+	unlink(".test_c2");
+}
+
 #define DO_TEST(test) \
 	do{ \
 	try{ \
@@ -388,6 +525,12 @@ int main(){
 	DO_TEST(test_positionals);
 	DO_TEST(test_positionals_and_options);
 	DO_TEST(test_option_terminator);
+	DO_TEST(test_token_iterator);
+	DO_TEST(test_positionals_and_options_from_stream);
+	DO_TEST(test_config_file_parsing_short_option);
+	DO_TEST(test_config_file_parsing_long_option);
+	DO_TEST(test_config_file_parsing_short_and_long_options);
+	DO_TEST(test_config_file_parsing_loop);
 	
 	if(!failures)
 		std::cout << "Test successful" << std::endl;

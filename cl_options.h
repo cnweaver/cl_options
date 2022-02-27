@@ -25,9 +25,12 @@
 #ifndef CL_OPTIONS_H
 #define CL_OPTIONS_H
 
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <iostream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -122,10 +125,14 @@ private:
 	std::map<char,std::function<void(std::string)>> shortOptions;
 	///short options which do not take a value
 	std::map<char,std::function<void()>> shortOptionsNoStore;
+	///short options which correspond to reading a config file (an must take the file path as a value)
+	std::set<char> shortOptionsConfig;
 	///long options which take a value
 	std::map<std::string,std::function<void(std::string)>> longOptions;
 	///long options which do not take a value
 	std::map<std::string,std::function<void()>> longOptionsNoStore;
+	///long options which correspond to reading a config file (an must take the file path as a value)
+	std::set<std::string> longOptionsConfig;
 	///whether the help message was automatically printed
 	bool printedUsage;
 	///the help text
@@ -153,11 +160,11 @@ private:
 	
 	///check whether a short option already exists
 	bool optionKnown(char ident){
-		return(shortOptions.count(ident) || shortOptionsNoStore.count(ident));
+		return(shortOptions.count(ident) || shortOptionsNoStore.count(ident) || shortOptionsConfig.count(ident));
 	}
 	///check whether a long option already exists
 	bool optionKnown(std::string ident){
-		return(longOptions.count(ident) || longOptionsNoStore.count(ident));
+		return(longOptions.count(ident) || longOptionsNoStore.count(ident) || longOptionsConfig.count(ident));
 	}
 	
 	///ensure that a value is a string
@@ -226,10 +233,15 @@ private:
 		ArgumentState(ArgumentStateType t, std::string opt):type(t),option(opt){}
 	};
 	
+	struct ParsingState{
+		std::vector<std::string> positionals;
+		std::vector<std::string> fileStack;
+	};
+	
 	///Process one argument as a short option
 	///\param arg the argument
 	///\param startIdx the character index within arg where the option should begin
-	ArgumentState handleShortOption(const std::string& arg, const size_t startIdx){
+	ArgumentState handleShortOption(const std::string& arg, const size_t startIdx, ParsingState& ps){
 		static const auto& npos=std::string::npos;
 		size_t endIdx, valueOffset=0;
 		if(allowShortValueWithoutEquals || allowShortOptionCombination){
@@ -258,13 +270,19 @@ private:
 			shortOptionsNoStore.find(optC)->second();
 			//if stuff remains in the argument, recurse to process it
 			if(allowShortOptionCombination && endIdx!=npos)
-				return(handleShortOption(arg,startIdx+1)); 
+				return(handleShortOption(arg,startIdx+1,ps)); 
 		}
 		else if(shortOptions.count(optC)){
 			if(endIdx==npos)
 				return(ArgumentState{ArgumentState::OptionNeedsValue,opt});
 			std::string value=arg.substr(endIdx+valueOffset);
 			shortOptions.find(optC)->second(value);
+		}
+		else if(shortOptionsConfig.count(optC)){
+			if(endIdx==npos)
+				return(ArgumentState{ArgumentState::OptionNeedsValue,opt});
+			std::string value=arg.substr(endIdx+valueOffset);
+			parseArgsFromFile(ps, value);
 		}
 		else
 			throw std::runtime_error("Unknown option: '"+opt+"' in '"+arg+"'");
@@ -275,7 +293,7 @@ private:
 	///Process one argument as a long option
 	///\param arg the argument
 	///\param startIdx the character index within arg where the option should begin
-	ArgumentState handleLongOption(const std::string& arg, const size_t startIdx){
+	ArgumentState handleLongOption(const std::string& arg, const size_t startIdx, ParsingState& ps){
 		static const auto& npos=std::string::npos;
 		size_t endIdx=arg.find('=',startIdx);
 		std::string opt=arg.substr(startIdx,(endIdx==npos?npos:endIdx-startIdx));
@@ -300,6 +318,11 @@ private:
 				throw std::runtime_error("Malformed option: '"+arg+"' (no value expected for this flag)");
 			longOptionsNoStore.find(opt)->second();
 		}
+		else if(longOptionsConfig.count(opt)){
+			if(endIdx==npos)
+				return(ArgumentState{ArgumentState::OptionNeedsValue,opt});
+			parseArgsFromFile(ps, value);
+		}
 		else
 			throw std::runtime_error("Unknown option: '"+arg+"'");
 		
@@ -308,7 +331,7 @@ private:
 	
 	///Process one argument in isolation
 	///\return the type of the argument and whether it was consumed
-	ArgumentState handleNextArg(const std::string& arg){
+	ArgumentState handleNextArg(const std::string& arg, ParsingState& ps){
 		if(arg.size()<2) //not an option, skip it
 			return(ArgumentState::NonOption);
 		if(arg[0]!='-') //not an option, skip it
@@ -319,31 +342,90 @@ private:
 		if(startIdx>2) //not an option, skip it
 			return(ArgumentState::NonOption);
 		if(startIdx==1) //dealing with a short option
-			return(handleShortOption(arg,startIdx));
+			return(handleShortOption(arg,startIdx,ps));
 		else //dealing with a long option
-			return(handleLongOption(arg,startIdx));
+			return(handleLongOption(arg,startIdx,ps));
 	}
 	
 	///Process an argument which takes a value
 	///\param option the name of the value consuming option previously encountered
 	///\param value the next argument, taken to be the value
 	///\pre the argument has aready been classified and sanity checked by handleNextArg
-	void handleOptWithValue(const std::string& opt, const std::string& value){
+	void handleOptWithValue(const std::string& opt, const std::string& value, ParsingState& ps){
 		if(opt.size()==1){
 			char optC=opt[0];
-			if(shortOptions.count(optC)){
+			if(shortOptions.count(optC))
 				shortOptions.find(optC)->second(value);
-			}
+			else if(shortOptionsConfig.count(optC))
+				parseArgsFromFile(ps, value);
 			else
 				throw std::runtime_error("Internal logic error handling option: '"+opt+"'");
 		}
 		else{
-			if(longOptions.count(opt)){
+			if(longOptions.count(opt))
 				longOptions.find(opt)->second(value);
-			}
+			else if(longOptionsConfig.count(opt))
+				parseArgsFromFile(ps, value);
 			else
 				throw std::runtime_error("Internal logic error handling option: '"+opt+"'");
 		}
+	}
+	
+	template<typename Iterator>
+	std::vector<std::string> parseArgs(ParsingState& ps, Iterator argBegin, Iterator argEnd){
+		while(argBegin!=argEnd){
+			std::string arg=*argBegin;
+			ArgumentState state=handleNextArg(arg,ps);
+			switch(state.type){
+				case ArgumentState::Option:
+					//nothing left to do
+					break;
+				case ArgumentState::NonOption:
+					//treat as a positional argument
+					ps.positionals.push_back(arg);
+					break;
+				case ArgumentState::OptionNeedsValue:
+					argBegin++;
+					if(argBegin==argEnd)
+						throw std::runtime_error("Missing value for '"+arg+"'");
+					handleOptWithValue(state.option,*argBegin,ps);
+					break;
+				case ArgumentState::OptionTerminator:
+					//no more option parsing should be done; shove all remaining
+					//arguments into positionals
+					for(argBegin++; argBegin!=argEnd; argBegin++)
+						ps.positionals.push_back(*argBegin);
+					break;
+			}
+			
+			//move to the next argument, unless we know all arguments have 
+			//already been consumed
+			if(state.type!=ArgumentState::OptionTerminator)
+				argBegin++;
+		}
+		return(ps.positionals);
+	}
+	
+	std::vector<std::string> parseArgsFromFile(ParsingState& ps, std::string path){
+		if(std::find(ps.fileStack.begin(),ps.fileStack.end(),path)!=ps.fileStack.end()){
+			std::ostringstream err;
+			err << "Configuration file loop: ";
+			for(const auto file : ps.fileStack)
+				err << "\n  " << file;
+			err << "\n  " << path << "\nConfiguration parsing terminated";
+			throw std::runtime_error(err.str());
+		}
+		std::ifstream infile(path);
+		if(!infile)
+			throw std::runtime_error("Unable to read "+path);
+		using CharIterator=std::istreambuf_iterator<char>;
+		using TokenIterator=TokenIterator<CharIterator>;
+		CharIterator cit(infile), cend;
+		TokenIterator it(cit,cend), end(cend,cend);
+		ps.fileStack.push_back(path);
+		parseArgs(ps,it,end);
+		ps.fileStack.pop_back();
+		return(ps.positionals);
 	}
 	
 	///Construct a string describing all of the synonyms for an option
@@ -375,15 +457,134 @@ private:
 		return(s);
 	}
 	
+	///Helper type for specializations of valueForDisplay which want to reutrn a
+	///different type than that on which they operate
 	template<typename T>
 	struct valueForDisplay_traits{
 		using Result=const T&;
 	};
 	
+	///Print an option value, typically a default, nicely
 	template<typename T>
 	typename valueForDisplay_traits<T>::Result valueForDisplay(const T& value) const{
 		return value;
 	}
+	
+	///An iterator over a stream of tokens derived by applying shell-style splitting
+	///and quoting rules to an underlying stream of characters
+	template<typename CharIterator>
+	struct TokenIterator : public std::iterator<std::input_iterator_tag, const std::string>{
+	public:
+		TokenIterator(CharIterator c, CharIterator e):cur(c),end(e),done(false){
+			computeNext();
+		}
+		TokenIterator(const TokenIterator& other):
+		cur(other.cur),end(other.end),val(other.val),done(other.done){}
+		TokenIterator& operator++(){ //preincrement
+			computeNext();
+			return *this;
+		}
+		TokenIterator operator++(int){ //postincrement
+			TokenIterator prev(*this);
+			computeNext();
+			return prev;
+		}
+		reference operator*() const{
+			return val;
+		}
+		bool operator==(const TokenIterator& other) const{
+			if(done || other.done)
+				return done==other.done;
+			return cur==other.cur;
+		}
+		bool operator!=(const TokenIterator& other) const{
+			if(done || other.done)
+				return done!=other.done;
+			return cur!=other.cur;
+		}
+	private:
+		void computeNext(){
+			val.clear();
+			if(cur==end){
+				done=true;
+				return;
+			}
+			//whitespace or quotes may be escaped when not in any quoting
+			//simple quotes (') preserve all characters exactly, except the next ', which ends the quoting
+			//complex quotes (") preserve whitespace and single quotes, and allow escaped ", otherwise the next " ends the quoting
+			bool inComplexQuote=false;
+			bool inSimpleQuote=false;
+			bool inEscape=false;
+			while(cur!=end){
+				auto c=*cur++;
+				if(c=='\\'){
+					if(inEscape){ // \\ forms the escape sequence for a backslash itself
+						val+=c;
+						inEscape=false;
+					}
+					else if(!inSimpleQuote) //otherwise, if allowed, begin an escape sequence
+						inEscape=true;
+					else //inside simple quotes, backslashes are just themselves
+						val+=c;
+				}
+				else if(c=='\''){
+					if(inSimpleQuote)
+						inSimpleQuote=false;
+					else if(inComplexQuote || inEscape){
+						val+=c;
+					}
+					else
+						inSimpleQuote=true;
+					inEscape=false; //if we were in an escape sequence, we now are not
+				}
+				else if(c=='"'){
+					if(inSimpleQuote)
+						val+=c;
+					else if(inComplexQuote){
+						if(inEscape){
+							val+=c;
+							inEscape=false;
+						}
+						else
+							inComplexQuote=false;
+					}
+					else{
+						if(inEscape){
+							val+=c;
+							inEscape=false;
+						}
+						else
+							inComplexQuote=true;
+					}
+				}
+				else if(std::isspace(c)){
+					if(inSimpleQuote || inComplexQuote){
+						val+=c;
+						inEscape=false;
+					}
+					else if(inEscape){
+						val+=c;
+						inEscape=false;
+					}
+					else{
+						if(!val.empty()){
+							return;
+						}
+					}
+				}
+				else{
+					val+=c;
+					inEscape=false;
+				}
+			}
+		}
+		
+		CharIterator cur, end;
+		std::string val;
+		bool done;
+	};
+	
+	friend class cl_options_test_access;
 	
 public:
 	///Construct an OptionParser
@@ -472,6 +673,7 @@ public:
 	///\param ident the name of the option
 	///\param destination the variable to which the option's value will be stored
 	///\param description the description of the option
+	///\param valueName the name used to document the value
 	template<typename T>
 	void addOption(char ident, T& destination, std::string description, std::string valueName="value"){
 		checkIdentifier(std::string(1,ident));
@@ -498,6 +700,7 @@ public:
 	///\param ident the name of the option
 	///\param action the callback function
 	///\param description the description of the option
+	///\param valueName the name used to document the value
 	template<typename DataType>
 	void addOption(char ident, std::function<void(DataType)> action, std::string description, std::string valueName="value"){
 		checkIdentifier(std::string(1,ident));
@@ -507,10 +710,25 @@ public:
 		ss  << " -" << ident << ' ' << underline(valueName) << ": " << description << '\n';
 		usageMessage+=ss.str();
 	}
+	///Add a short option which reads further configuration from a file whose path is given by a value
+	///\param ident the name of the option
+	///\param description the description of the option
+	///\param valueName the name used to document the value
+	void addConfigFileOption(char ident, std::string description, std::string valueName="file"){
+		checkIdentifier(std::string(1,ident));
+		if(optionKnown(ident))
+			throw std::logic_error("Attempt to redefine option '"+asString(ident)+"'");
+		shortOptionsConfig.insert(ident);
+		description=indentDescription(description);
+		std::ostringstream ss;
+		ss  << " -" << ident << ' ' << underline(valueName) << ": " << description << '\n';
+		usageMessage+=ss.str();
+	}
 	///Add a long option which stores a value to a variable
 	///\param ident the name of the option
 	///\param destination the variable to which the option's value will be stored
 	///\param description the description of the option
+	///\param valueName the name used to document the value
 	template<typename T>
 	void addOption(std::string ident, T& destination, std::string description, std::string valueName="value"){
 		checkIdentifier(ident);
@@ -537,10 +755,25 @@ public:
 	///\param ident the name of the option
 	///\param action the callback function
 	///\param description the description of the option
+	///\param valueName the name used to document the value
 	template<typename DataType>
 	void addOption(std::string ident, std::function<void(DataType)> action, std::string description, std::string valueName="value"){
 		checkIdentifier(ident);
 		addOption<DataType>(ident,std::move(action),longOptions);
+		description=indentDescription(description);
+		std::ostringstream ss;
+		ss  << " --" << ident << ' ' << underline(valueName) << ": " << description << '\n';
+		usageMessage+=ss.str();
+	}
+	///Add a long option which reads further configuration from a file whose path is given by a value
+	///\param ident the name of the option
+	///\param description the description of the option
+	///\param valueName the name used to document the value
+	void addConfigFileOption(std::string ident, std::string description, std::string valueName="file"){
+		checkIdentifier(ident);
+		if(optionKnown(ident))
+			throw std::logic_error("Attempt to redefine option '"+asString(ident)+"'");
+		longOptionsConfig.insert(ident);
 		description=indentDescription(description);
 		std::ostringstream ss;
 		ss  << " --" << ident << ' ' << underline(valueName) << ": " << description << '\n';
@@ -603,6 +836,26 @@ public:
 		ss << ' ' << synonymList(idents) << ' ' << underline(valueName) << ": " << description << '\n';
 		usageMessage+=ss.str();
 	}
+	///Add an option with multiple synonyms which reads further configuration from a file whose path is given by a value
+	///\param ident the name of the option
+	///\param description the description of the option
+	///\param valueName the name used to document the value
+	void addConfigFileOption(std::initializer_list<std::string> idents, std::string description, std::string valueName="file"){
+		for(auto ident : idents)
+			checkIdentifier(ident);
+		for(auto ident : idents){
+			if(optionKnown(ident))
+				throw std::logic_error("Attempt to redefine option '"+asString(ident)+"'");
+			if(ident.size()==1)
+				shortOptionsConfig.insert(ident[0]);
+			else
+				longOptionsConfig.insert(ident);
+		}
+		description=indentDescription(description);
+		std::ostringstream ss;
+		ss << ' ' << synonymList(idents) << ' ' << underline(valueName) << ": " << description << '\n';
+		usageMessage+=ss.str();
+	}
 	
 	///Parse a collection of arguments
 	///\param argBegin an iterator referencing the first argument
@@ -611,38 +864,8 @@ public:
 	///        the input
 	template<typename Iterator>
 	std::vector<std::string> parseArgs(Iterator argBegin, Iterator argEnd){
-		std::vector<std::string> positionals;
-		while(argBegin!=argEnd){
-			std::string arg=*argBegin;
-			ArgumentState state=handleNextArg(arg);
-			switch(state.type){
-				case ArgumentState::Option:
-					//nothing left to do
-					break;
-				case ArgumentState::NonOption:
-					//treat as a positional argument
-					positionals.push_back(arg);
-					break;
-				case ArgumentState::OptionNeedsValue:
-					argBegin++;
-					if(argBegin==argEnd)
-						throw std::runtime_error("Missing value for '"+arg+"'");
-					handleOptWithValue(state.option,*argBegin);
-					break;
-				case ArgumentState::OptionTerminator:
-					//no more option parsing should be done; shove all remaining
-					//arguments into positionals
-					for(argBegin++; argBegin!=argEnd; argBegin++)
-						positionals.push_back(*argBegin);
-					break;
-			}
-			
-			//move to the next argument, unless we know all arguments have 
-			//already been consumed
-			if(state.type!=ArgumentState::OptionTerminator)
-				argBegin++;
-		}
-		return(positionals);
+		ParsingState ps;
+		return(parseArgs(ps,argBegin,argEnd));
 	}
 	///Parse a collection of arguments
 	///\param argc the number of arguments
@@ -659,6 +882,36 @@ public:
 	///        the input
 	std::vector<std::string> parseArgs(int argc, const char* argv[]){
 		return(parseArgs(argv,argv+argc));
+	}
+	///Parse a collection of arguments from a character stream, with basic
+	///shell-style splitting and quoting rules
+	///\param stream the input stream from which to read options
+	///\return the positional arguments in the order they were encountered in 
+	///        the input
+	template<typename IStream>
+	std::vector<std::string> parseArgsFromStream(IStream& stream){
+		using CharIterator=std::istreambuf_iterator<char>;
+		using TokenIterator=TokenIterator<CharIterator>;
+		CharIterator cit(stream), cend;
+		TokenIterator it(cit,cend), end(cend,cend);
+		return(parseArgs(it,end));
+	}
+	///Parse a collection of arguments from a file, with basic shell-style
+	///splitting and quoting rules
+	///\param path the path to the file from which to read options
+	///\return the positional arguments in the order they were encountered in 
+	///        the input
+	std::vector<std::string> parseArgsFromFile(std::string path){
+		std::ifstream infile(path);
+		if(!infile)
+			throw std::runtime_error("Unable to read "+path);
+		using CharIterator=std::istreambuf_iterator<char>;
+		using TokenIterator=TokenIterator<CharIterator>;
+		CharIterator cit(infile), cend;
+		TokenIterator it(cit,cend), end(cend,cend);
+		ParsingState ps;
+		ps.fileStack.push_back(path);
+		return(parseArgs(ps,it,end));
 	}
 };
 

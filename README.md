@@ -159,3 +159,24 @@ through without further interpretation. This feature is enabled by
 Because of the simplistic way that the help text is accumulated currently, disabling
 this feature after enabling it does not remove the automatically added entry in the 
 help text, and enabling it multiple times will result in multiple copies of that text. 
+
+When a program needs to be run repeatedly with a large set of options (and positional
+arguments), it may be useful to read them from a configuration file. The 
+`OptionParser::addConfigFileOption` family of member functions allow designating an
+option name which takes a file path, and causes the contents of the referenced file to be read
+as further options. The file format supported is essentially the same as for direct arguments; it is
+not INI, YAML, TOML, or some other distinct format. Instead, Bourne shell-like argument splitting
+on whitespace is performed, whitespace characters may be escaped with backslahes or 
+protected by quotes, and double quotes permit single quotes and backslash escapes within,
+while single quotes treat all characters within literally (and thus do not allow escape sequences,
+but can contain literal double quotes). The intention is that, in general, any arguments which
+would be supplied at the command line can instead be placed in a configuration file and will be
+treated equivalently. Note, however, that the config parser does not implement all shell features, 
+for example, it will not expand `~` to the value of `$HOME`. 
+
+Configuration file options may be used from within configuration files. This is useful when some
+block of options or arguments is shared between several configurations, as it can be factored
+out into a separate file rather than being repeated. Cyclic references among configuration files
+would lead to infinite recursion, and so should be avoided. The library has a simplistic ability to
+detect such cycles, but since it merely matches file paths as written, it can be fooled by symbolic
+links or other mechanisms which allow the same file to be referenced by multiple names. 
