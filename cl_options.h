@@ -25,6 +25,7 @@
 #ifndef CL_OPTIONS_H
 #define CL_OPTIONS_H
 
+#include <algorithm>
 #include <fstream>
 #include <functional>
 #include <iterator>
